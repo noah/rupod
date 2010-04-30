@@ -1,2 +1,6 @@
-rupod is:
-        A ruby CLI ipod manger with a gnupod backend
+rupod 
+  - A ruby CLI ipod manger with a gnupod backend
+
+dependencies
+  - gnupod
+  - ruby
