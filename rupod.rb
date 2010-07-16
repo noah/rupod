@@ -14,21 +14,7 @@ class String
   end
 end
 
-module Gnupod
-
-  GNUPOD_SEARCH_SCRIPT='gnupod_search.pl'
-
-  class Artists
-
-    include Enumerable
-
-    attr_reader :artists
-
-    def initialize
-      self.setup
-      @artists = self.update
-    end
-
+class Array
     def / len
       a = []
       each_with_index do |x,i|
@@ -37,42 +23,84 @@ module Gnupod
       end
       a
     end
+end
+
+module Gnupod
+
+  GNUPOD_SEARCH_SCRIPT='gnupod_search.pl --view=al'
+
+  class Gnupod
+    include Enumerable
+
+    def initialize
+      self.sane?
+      @data = {'artist' => [], 'album' => []}
+      @view = nil # override below
+      self.read
+    end
 
     def [](n)
-      @artists[n]
+      @data[n]
     end
 
     def each
-      @artists.each { |i| yield i }
+      @data[@view].each { |i| yield i }
     end
 
     def each_index
-      @artists.each_index { |i| yield i }
+      @data[@view].each_index { |i| yield i }
     end
 
-    def setup
+    def sane?
       if ! GNUPOD_SEARCH_SCRIPT.in_path?
         puts "#{GNUPOD_SEARCH_SCRIPT} not found in path, exiting . . ." 
         exit -1
       end
     end
-
-    def update
-      artists=`#{GNUPOD_SEARCH_SCRIPT}|awk -F'|' '{print $2}' |sort|uniq`.lstrip.split(/\n/).collect{|item| item.strip}.reject{|item| item =~ /ARTIST/ }
-      artists.length.times do |i|
-        artists[i] = {
-            'artist' => artists[i],
-            'status' => RupodModule::KEEP,
-            'index' => i
-          }
+    
+    def read
+      aa = `#{GNUPOD_SEARCH_SCRIPT}`.split(/\n/).collect {|e| 
+        e.split('|').collect{|e| e.strip}
+      }.reject{|e| e.join(' ') =~ /ALBUM|ARTIST|gnupod_search.pl|===/}.sort.uniq
+      aa.collect{|el| el[0]}.sort.uniq.each_with_index do |el,i|
+        @data['artist'][i] = {
+          'artist' => el,
+          'status' => RupodModule::KEEP,
+          'index' => i
+        }
       end
-      artists
+      aa.collect{|el| el[1]}.sort.uniq.each_with_index do |el,i|
+        @data['album'][i] = {
+          'album' => el,
+          'status' => RupodModule::KEEP,
+          'index' => i
+        }
+      end
     end
 
-    def delete
-      search_regex = '"' + @artists.select{|artist| artist['status'] =~ /#{RupodModule::DELETE}/}.collect{|artist| artist['artist']}.join('|') + '"'
-      search_string = "#{GNUPOD_SEARCH_SCRIPT} --artist=#{search_regex} --delete"
+    def to_s
+      @data.inspect
+    end
+
+    def delete(view)
+      search_regex = '"' + @data[view].select{|d| d['status'] =~ /#{RupodModule::DELETE}/}.collect{|d| d[view]}.join('|') + '"'
+      search_string = "#{GNUPOD_SEARCH_SCRIPT} --#{view}=#{search_regex} --delete"
       puts `#{search_string}`
+    end
+
+  end
+
+  class Albums < Gnupod
+    attr_reader :albums
+    def initialize
+      @view = 'albums'
+    end
+  end
+
+  class Artists < Gnupod
+    attr_reader :artists
+    def initialize
+      @view = 'albums'
     end
   end
 
@@ -95,29 +123,31 @@ module RupodModule
 
   What would you like to do today?
 
-          1)      Select numbers (optionally) separated by a space to selectively delete.
-          2)      Type "ALL" to toggle all.
-          3)      When you're ready, type "GO".
-          4)      Type "Q" to quit.
+          1)      Type numbers separated by a space to selectively delete
+          2)      a to toggle all
+          3)      c to commit changes
+          4)      q to quit
+          5)      t to toggle album/artist view 
                 
   EOF
 end
 
 class Rupod
+
   def initialize
-    @artists = Gnupod::Artists.new
-    # TODO @albums = Gnupod::Albums.new
+    @data = Gnupod::Gnupod.new
+    @view = 'artist' if @view.nil?
     self.menu
     self.input_loop
   end
-
+ 
   def menu
     system('clear')
     puts RupodModule::MACRO
-    max = @artists.max{|a,b| a['artist'].length <=> b['artist'].length}['artist'].length + 5
-    rows = (@artists/RupodModule::COLS)
+    max = @data[@view].max{|a,b| a[@view].length <=> b[@view].length}[@view].length + 5
+    rows = (@data[@view]/RupodModule::COLS)
     rows.each_with_index do |group,i|
-      group = group.collect{|g| "#{g['status']} #{g['index']}\t#{g['artist']}"}
+      group = group.collect{|g| "#{g['status']} #{g['index']}\t#{g[@view]}"}
       puts sprintf("%-#{max}s " * group.length, *group)
     end
     puts RupodModule::MENU_CHOICES
@@ -126,24 +156,35 @@ class Rupod
   def toggle_delete(n)
     begin
       n = Integer(n)
-      @artists[n]['status'] = @artists[n]['status'] ==
+      @data[@view][n]['status'] = @data[@view][n]['status'] ==
         RupodModule::DELETE ?  RupodModule::KEEP : RupodModule::DELETE
     rescue
       return
     end
   end
 
+  def toggle_view
+    if @view == 'artist'
+      @view = 'album'
+    else
+      @view = 'artist'
+    end
+  end
+
   def input_loop
     while input = STDIN.gets.chop!
       case input
+      when /T/i
+        self.toggle_view
       when /Q/i
         puts "Happy listening!"
+        system("mktunes.pl")
         exit
-      when /GO/i
-        @artists.delete
-        @artists = Gnupod::Artists.new
-      when /ALL/i
-        @artists.each_index{|i| self.toggle_delete(i)}
+      when /C/i
+        @data.delete(@view)
+        @data = Gnupod::Gnupod.new
+      when /A/i
+        @data[@view].each_index{|i| self.toggle_delete(i)}
       when  /^(\d+\s?)?/
         input.split(/\s/).each do |i|
           self.toggle_delete(i)
@@ -154,5 +195,7 @@ class Rupod
   end
 
 end
+
+#Gnupod::Gnupod.new
 
 Rupod.new
