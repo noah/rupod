@@ -83,7 +83,13 @@ module Gnupod
     end
 
     def delete(view)
-      search_regex = '"' + @data[view].select{|d| d['status'] =~ /#{RupodModule::DELETE}/}.collect{|d| d[view]}.join('|').gsub('"','\"').gsub('(','\(').gsub(')','\)') + '"'
+      search_regex = '"' + @data[view].select{|d| d['status'] =~ /#{RupodModule::DELETE}/}.collect{|d| d[view]}
+        .join('|')
+        .gsub('"','\"')
+        .gsub('(','\(')
+        .gsub(')','\)')
+        .gsub('[','\[')
+        .gsub(']','\]') + '"'
       search_string = "#{GNUPOD_SEARCH_SCRIPT} --#{view}=#{search_regex} --delete"
       puts `#{search_string}`
     end
