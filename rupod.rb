@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 #
-# rupod : express yourself
-# (c) 2010 Noah K. Tilton
+# rupod : selectively delete albums or artists (uses gnupod)
+#       (c) 2010 Noah K. Tilton
 #
 # Released under the terms of the MIT license:
 #       http://www.opensource.org/licenses/mit-license.php
@@ -12,22 +12,27 @@ class String
   def in_path? 
     return ! /no #{self} in/.match(`which #{self} 2>&1`)
   end
+
+  def mounted?
+    return `mount|grep #{Gnupod::IPOD}|wc -l`.to_i > 0
+  end
 end
 
 class Array
-    def / len
-      a = []
-      each_with_index do |x,i|
-        a << [] if i % len == 0
-        a.last << x
-      end
-      a
+  def / len
+    a = []
+    each_with_index do |x,i|
+      a << [] if i % len == 0
+      a.last << x
     end
+    a
+  end
 end
 
 module Gnupod
 
-  GNUPOD_SEARCH_SCRIPT='gnupod_search.pl --view=al'
+  IPOD='/mnt/ipod'
+  GNUPOD_SEARCH_SCRIPT='gnupod_search.pl --view=la'
 
   class Gnupod
     include Enumerable
@@ -56,20 +61,25 @@ module Gnupod
         puts "#{GNUPOD_SEARCH_SCRIPT} not found in path, exiting . . ." 
         exit -1
       end
+
+      if ! IPOD.mounted?
+        puts "#{IPOD} not mounted, exiting . . .\nN.B.:  rupod expects your mountpoint to be `#{IPOD}'"
+        exit -1
+      end
     end
     
     def read
       aa = `#{GNUPOD_SEARCH_SCRIPT}`.split(/\n/).collect {|e| 
         e.split('|').collect{|e| e.strip}
       }.reject{|e| e.join(' ') =~ /ALBUM|ARTIST|gnupod_search.pl|===/}.sort.uniq
-      aa.collect{|el| el[0]}.sort.uniq.each_with_index do |el,i|
+      aa.collect{|el| el[1]}.sort.uniq.each_with_index do |el,i|
         @data['artist'][i] = {
           'artist' => el,
           'status' => RupodModule::KEEP,
           'index' => i
         }
       end
-      aa.collect{|el| el[1]}.sort.uniq.each_with_index do |el,i|
+      aa.collect{|el| el[0]}.sort.uniq.each_with_index do |el,i|
         @data['album'][i] = {
           'album' => el,
           'status' => RupodModule::KEEP,
@@ -91,6 +101,7 @@ module Gnupod
         .gsub('[','\[')
         .gsub(']','\]') + '"'
       search_string = "#{GNUPOD_SEARCH_SCRIPT} --#{view}=#{search_regex} --delete"
+      puts search_string
       puts `#{search_string}`
     end
 
@@ -99,14 +110,14 @@ module Gnupod
   class Albums < Gnupod
     attr_reader :albums
     def initialize
-      @view = 'albums'
+      @view = 'album'
     end
   end
 
   class Artists < Gnupod
     attr_reader :artists
     def initialize
-      @view = 'albums'
+      @view = 'artist'
     end
   end
 
@@ -121,7 +132,7 @@ module RupodModule
    ______ _______ ______ _______ _____  
   |   == \\   !   |   == \\       |     \\ 
   |      <   !   |    __/   =   |  ==  |
-  |___|__|_______|___|  |_______|_____/  v1.0  pre-alpha
+  |___|__|_______|___|  |_______|_____/  v0.0.4
 
   EOF
 
@@ -146,10 +157,23 @@ class Rupod
     self.menu
     self.input_loop
   end
+
+  def about
+    # Filesystem    Type    Size  Used Avail Use% Mounted on
+    # /dev/sde1     vfat    7.5G  3.4G  4.1G  46% /mnt/ipod
+    return `df -h #{Gnupod::IPOD}`
+  end
  
   def menu
     system('clear')
     puts RupodModule::MACRO
+    puts self.about; puts
+    puts "Showing #{@view} view"; puts
+    if @data[@view].empty?
+      puts "No data, mang.  Goobye"
+      puts @data.inspect
+      exit
+    end
     max = @data[@view].max{|a,b| a[@view].length <=> b[@view].length}[@view].length + 5
     rows = (@data[@view]/RupodModule::COLS)
     rows.each_with_index do |group,i|
@@ -188,6 +212,7 @@ class Rupod
         exit
       when /C/i
         @data.delete(@view)
+        system("mktunes.pl")
         @data = Gnupod::Gnupod.new
       when /A/i
         @data[@view].each_index{|i| self.toggle_delete(i)}
