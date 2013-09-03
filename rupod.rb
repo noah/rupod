@@ -66,6 +66,13 @@ module Gnupod
         puts "#{IPOD} not mounted, exiting . . .\nN.B.:  rupod expects your mountpoint to be `#{IPOD}'"
         exit -1
       end
+
+      _ = `#{GNUPOD_SEARCH_SCRIPT}`
+      if $? != 0
+        puts "problem with gnupod?"
+        exit -1
+      end
+
     end
     
     def read
@@ -170,7 +177,7 @@ class Rupod
     puts self.about; puts
     puts "Showing #{@view} view"; puts
     if @data[@view].empty?
-      puts "No data, mang.  Goobye"
+      puts "No data, mang.  Perhaps you need to add some music?  Goobye"
       puts @data.inspect
       exit
     end
